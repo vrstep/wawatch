@@ -12,6 +12,8 @@ import (
 	"github.com/vrstep/wawatch-backend/models"
 )
 
+var _ AnimeServiceAPIClient = (*AnimeClient)(nil)
+
 type AnimeClient struct {
 	client    *resty.Client
 	baseURL   string
@@ -43,17 +45,10 @@ func NewAnimeClient() *AnimeClient {
 	}
 }
 
-// WithRequestID sets the X-Request-ID header for the next request.
-// It returns a new client instance to ensure header is set per request chain.
-func (c *AnimeClient) WithRequestID(requestID string) *AnimeClient {
-	// Create a shallow copy of the client to set header for this specific call chain
-	// Note: This creates a new Resty client instance for each request ID which might be inefficient.
-	// A better approach might be to set the header on a per-request basis using `R().SetHeader()`.
-	// For simplicity now, we'll use a new instance or set it on the underlying client if careful.
-	// Let's set it directly on the request object.
-	newC := *c                 // shallow copy
-	newC.requestID = requestID // store it for use in request methods
-	return &newC
+func (c *AnimeClient) WithRequestID(requestID string) AnimeServiceAPIClient {
+	newC := *c // shallow copy
+	newC.requestID = requestID
+	return &newC // Return the concrete type, which satisfies the interface
 }
 
 // Helper to prepare a request with common settings like RequestID

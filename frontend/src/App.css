@@ -1,10 +1,25 @@
+/* App.css */
+
 #root {
+  width: 100%;
+  height: 100%; /* Make #root fill the body */
+  /* The div inside App.js is already display: flex and flex-direction: column.
+     #root itself doesn't necessarily need to be flex, as long as it has full height/width
+     to allow its child (the App.js div) to use min-h-screen effectively. */
+
+  /* These properties were constraining the #root element and preventing
+     the app from taking the full viewport.
+     They are better handled by Tailwind utility classes on specific content
+     containers within your pages if you need a centered, max-width content column. */
+  /*
   max-width: 1280px;
   margin: 0 auto;
   padding: 2rem;
   text-align: center;
+  */
 }
 
+/* Your existing Vite-specific logo styles can remain if they are still in use */
 .logo {
   height: 6em;
   padding: 1.5em;
@@ -33,6 +48,8 @@
   }
 }
 
+/* The .card and .read-the-docs styles seem generic from Vite's template.
+   Keep them if used, or remove if not. */
 .card {
   padding: 2em;
 }

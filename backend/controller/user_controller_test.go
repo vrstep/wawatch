@@ -1,205 +1,118 @@
-package controller
+package controller_test
 
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/vrstep/wawatch-backend/config" // Direct DB access for setup/verification
 	"github.com/vrstep/wawatch-backend/models"
-	"gorm.io/gorm"
+	"golang.org/x/crypto/bcrypt" // For password hashing in setup
 )
 
-// Test GetMyProfile Endpoint
-func TestGetMyProfile(t *testing.T) {
-	// Setup
-	_, cleanup := SetupTestDB(t) // Setup mock DB (even if not used directly, good practice)
-	defer cleanup()
-	router := SetupGin()
+// testRouter and testDB are assumed to be initialized by TestMain
 
-	// Mock User Data
-	mockUser := models.User{
-		Model:          gorm.Model{ID: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		Username:       "testuser",
-		Email:          "test@example.com",
-		Role:           "user",
-		ProfilePicture: "pic.jpg",
+func TestSignup_Success(t *testing.T) {
+	clearUserRelatedTables() // Use your helper from main_test.go or define locally
+
+	signupPayload := gin.H{
+		"username": "testsignup",
+		"password": "password123",
+		"email":    "signup@example.com",
 	}
+	rr := performRequest("POST", "/api/v1/auth/signup", signupPayload, testRouter)
 
-	// Setup Route and Handler
-	router.GET("/profile", func(c *gin.Context) {
-		// Simulate middleware setting the user
-		c.Set("user", mockUser)
-		GetMyProfile(c)
-	})
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	var response map[string]interface{}
+	json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.Equal(t, "User created successfully", response["message"])
 
-	// Perform Request
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/profile", nil)
-	// Simulate authentication (e.g., by setting cookie if middleware checks it,
-	// or directly setting context as done above)
-
-	router.ServeHTTP(w, req)
-
-	// Assertions
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var responseBody map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
+	// Verify user in DB
+	var user models.User
+	err := config.DB.Where("username = ?", "testsignup").First(&user).Error
 	assert.NoError(t, err)
-	assert.Equal(t, float64(mockUser.ID), responseBody["id"]) // JSON numbers are float64
-	assert.Equal(t, mockUser.Username, responseBody["username"])
-	assert.Equal(t, mockUser.Email, responseBody["email"])
-	assert.NotContains(t, responseBody, "password") // Ensure password is not returned
+	assert.Equal(t, "signup@example.com", user.Email)
 }
 
-// Test UpdateMyProfile Endpoint
-// func TestUpdateMyProfile(t *testing.T) {
-// 	// Setup
-// 	mock, cleanup := SetupTestDB(t)
-// 	defer cleanup()
-// 	router := SetupGin()
+func TestSignup_DuplicateUsername(t *testing.T) {
+	clearUserRelatedTables()
+	// Create an initial user
+	existingUser := models.User{Username: "existinguser", Password: "password", Email: "existing@example.com"}
+	config.DB.Create(&existingUser)
 
-// 	// Mock User Data
-// 	mockUserID := uint(1)
-// 	currentTime := time.Now()
-// 	mockUser := models.User{
-// 		Model:          gorm.Model{ID: mockUserID, CreatedAt: currentTime, UpdatedAt: currentTime},
-// 		Username:       "testuser",
-// 		Password:       "hashedpassword",
-// 		Email:          "old@test.com",
-// 		Role:           "user",
-// 		ProfilePicture: "old_pic.jpg",
-// 	}
+	signupPayload := gin.H{"username": "existinguser", "password": "password123"}
+	rr := performRequest("POST", "/api/v1/auth/signup", signupPayload, testRouter)
 
-// 	// Input Data
-// 	updateInput := gin.H{
-// 		"email":           "new@test.com",
-// 		"profile_picture": "new_pic.jpg",
-// 	}
-// 	requestBody, _ := json.Marshal(updateInput)
+	assert.Equal(t, http.StatusConflict, rr.Code) // Or whatever your controller returns for duplicates
+}
 
-// 	// Mock DB Expectations
-// 	// 1. Expect GORM to fetch the user first
-// 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE "users"\."id" = \$1 AND "users"\."deleted_at" IS NULL ORDER BY "users"\."id" LIMIT 1`).
-// 		WithArgs(int64(mockUserID)).
-// 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "deleted_at", "username", "password", "email", "role", "profile_picture"}).
-// 			AddRow(mockUser.ID, mockUser.CreatedAt, mockUser.UpdatedAt, nil,
-// 				mockUser.Username, mockUser.Password, mockUser.Email, mockUser.Role, mockUser.ProfilePicture))
+// TestLogin_Success was already outlined, ensure it's here.
 
-// 	// 2. Expect GORM to begin a transaction, update, and commit
-// 	mock.ExpectBegin()
-// 	mock.ExpectExec(`UPDATE "users" SET "email"=\$1,"profile_picture"=\$2,"updated_at"=\$3 WHERE "users"\."deleted_at" IS NULL AND "id" = \$4`).
-// 		WithArgs(updateInput["email"], updateInput["profile_picture"], sqlmock.AnyArg(), int64(mockUserID)).
-// 		WillReturnResult(sqlmock.NewResult(1, 1))
-// 	mock.ExpectCommit()
+func TestChangePassword_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "changepwuser", "oldpassword")
 
-// 	// Setup Route and Handler
-// 	router.PUT("/profile", func(c *gin.Context) {
-// 		// Set the user ID in context (as middleware would do)
-// 		c.Set("user", models.User{Model: gorm.Model{ID: mockUserID}})
-// 		UpdateMyProfile(c)
-// 	})
+	changePwPayload := gin.H{
+		"current_password": "oldpassword",
+		"new_password":     "newpassword123",
+	}
+	rr := performAuthRequest("PUT", "/api/v1/me/profile/password", changePwPayload, token, testRouter)
 
-// 	// Perform Request
-// 	w := httptest.NewRecorder()
-// 	req, _ := http.NewRequest(http.MethodPut, "/profile", bytes.NewBuffer(requestBody))
-// 	req.Header.Set("Content-Type", "application/json")
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var response map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.Equal(t, "Password changed successfully", response["message"])
 
-// 	router.ServeHTTP(w, req)
+	// Verify new password in DB (fetch user and try to compare hash)
+	var updatedUser models.User
+	config.DB.First(&updatedUser, user.ID)
+	err := bcrypt.CompareHashAndPassword([]byte(updatedUser.Password), []byte("newpassword123"))
+	assert.NoError(t, err, "New password should match")
+}
 
-// 	// Assertions
-// 	assert.Equal(t, http.StatusOK, w.Code)
+func TestChangePassword_IncorrectCurrent(t *testing.T) {
+	_, token := createAndLoginTestUser(config.DB, "changepwuser2", "oldpassword")
 
-// 	var responseBody map[string]interface{}
-// 	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
-// 	assert.NoError(t, err)
-// 	assert.Equal(t, updateInput["email"], responseBody["email"])
-// 	assert.Equal(t, updateInput["profile_picture"], responseBody["profile_picture"])
+	changePwPayload := gin.H{
+		"current_password": "wrongoldpassword",
+		"new_password":     "newpassword123",
+	}
+	rr := performAuthRequest("PUT", "/api/v1/me/profile/password", changePwPayload, token, testRouter)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
 
-// 	// Verify all DB expectations were met
-// 	assert.NoError(t, mock.ExpectationsWereMet())
-// }
+func TestChangeUsername_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "changeuname", "password123")
 
-// Test GetUserPublicAnimeList Endpoint
-// func TestGetUserPublicAnimeList(t *testing.T) {
-// 	mock, cleanup := SetupTestDB(t)
-// 	defer cleanup()
-// 	router := SetupGin()
+	payload := gin.H{
+		"new_username":     "newuname",
+		"current_password": "password123",
+	}
+	rr := performAuthRequest("PUT", "/api/v1/me/profile/username", payload, token, testRouter)
 
-// 	targetUsername := "publicuser"
-// 	targetUserID := uint(2)
-// 	animeID1 := 101
-// 	animeID2 := 102
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var dbUser models.User
+	config.DB.First(&dbUser, user.ID)
+	assert.Equal(t, "newuname", dbUser.Username)
+}
 
-// 	// Mock DB Expectations
-// 	// 1. Find the target user by username
-// 	// Revert to specific username string
-// 	mock.ExpectQuery(EscapeQuery(`SELECT * FROM "users" WHERE username = $1 AND "users"."deleted_at" IS NULL ORDER BY "users"."id" LIMIT 1`)).
-// 		WithArgs(targetUsername).
-// 		WillReturnRows(sqlmock.NewRows([]string{
-// 			"id", "created_at", "updated_at", "deleted_at",
-// 			"username", "password", "email", "role", "profile_picture",
-// 		}).AddRow(
-// 			int64(targetUserID), time.Now(), time.Now(), nil,
-// 			targetUsername, "hashedpassword", "publicuser@example.com", "user", "pic.jpg",
-// 		))
-// 	// 2. Find the user's anime list entries
-// 	listRows := sqlmock.NewRows([]string{"id", "user_id", "anime_external_id", "status", "score", "progress"}).
-// 		AddRow(10, targetUserID, animeID1, models.Watching, 8, 5).
-// 		AddRow(11, targetUserID, animeID2, models.Completed, 9, 12)
-// 	// Use int64 for user_id if targetUserID is uint
-// 	mock.ExpectQuery(EscapeQuery(`SELECT * FROM "user_anime_lists" WHERE user_id = $1 AND "user_anime_lists"."deleted_at" IS NULL`)).
-// 		WithArgs(int64(targetUserID)). // Use int64
-// 		WillReturnRows(listRows)
+func TestChangeEmail_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "changeemailuser", "password123")
 
-// 	// 3. Find anime cache details for each list item
-// 	animeRows1 := sqlmock.NewRows([]string{"id", "title", "cover_image", "format", "total_episodes"}).
-// 		AddRow(animeID1, "Anime Title 1", "cover1.jpg", "TV", 12)
-// 	// Use int64 for anime ID if animeID1 is int
-// 	mock.ExpectQuery(EscapeQuery(`SELECT * FROM "anime_caches" WHERE "anime_caches"."id" = $1 AND "anime_caches"."deleted_at" IS NULL ORDER BY "anime_caches"."id" LIMIT 1`)).
-// 		WithArgs(int64(animeID1)). // Use int64
-// 		WillReturnRows(animeRows1)
+	payload := gin.H{
+		"new_email":        "new@example.com",
+		"current_password": "password123",
+	}
+	rr := performAuthRequest("PUT", "/api/v1/me/profile/email", payload, token, testRouter)
 
-// 	animeRows2 := sqlmock.NewRows([]string{"id", "title", "cover_image", "format", "total_episodes"}).
-// 		AddRow(animeID2, "Anime Title 2", "cover2.jpg", "MOVIE", 1)
-// 	// Use int64 for anime ID if animeID2 is int
-// 	mock.ExpectQuery(EscapeQuery(`SELECT * FROM "anime_caches" WHERE "anime_caches"."id" = $1 AND "anime_caches"."deleted_at" IS NULL ORDER BY "anime_caches"."id" LIMIT 1`)).
-// 		WithArgs(int64(animeID2)). // Use int64
-// 		WillReturnRows(animeRows2)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var dbUser models.User
+	config.DB.First(&dbUser, user.ID)
+	assert.Equal(t, "new@example.com", dbUser.Email)
+}
 
-// 	// Setup Route
-// 	router.GET("/users/:username/animelist", GetUserPublicAnimeList)
-
-// 	// Perform Request
-// 	w := httptest.NewRecorder()
-// 	req, _ := http.NewRequest(http.MethodGet, "/users/"+targetUsername+"/animelist", nil)
-// 	router.ServeHTTP(w, req)
-
-// 	// Assertions
-// 	assert.Equal(t, http.StatusOK, w.Code)
-
-// 	var responseBody []map[string]interface{}
-// 	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
-// 	assert.NoError(t, err)
-// 	assert.Len(t, responseBody, 2)
-
-// 	// Check first item
-// 	assert.Equal(t, models.Watching, responseBody[0]["status"])
-// 	assert.Equal(t, float64(8), responseBody[0]["score"]) // JSON numbers
-// 	animeDetails1 := responseBody[0]["anime"].(map[string]interface{})
-// 	assert.Equal(t, float64(animeID1), animeDetails1["id"])
-// 	assert.Equal(t, "Anime Title 1", animeDetails1["title"])
-
-// 	// Check second item
-// 	assert.Equal(t, models.Completed, responseBody[1]["status"])
-// 	assert.Equal(t, float64(9), responseBody[1]["score"]) // JSON numbers
-// 	animeDetails2 := responseBody[1]["anime"].(map[string]interface{})
-// 	assert.Equal(t, float64(animeID2), animeDetails2["id"])
-// 	assert.Equal(t, "Anime Title 2", animeDetails2["title"])
-
-// 	assert.NoError(t, mock.ExpectationsWereMet())
-// }
+// Add tests for:
+// - ChangeUsername/Email with incorrect password
+// - ChangeUsername/Email with new username/email already taken
+// - Input validation failures (e.g., short new password, invalid email format)

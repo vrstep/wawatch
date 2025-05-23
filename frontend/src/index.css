@@ -1,3 +1,35 @@
+@import "tailwindcss";
+
+html {
+  box-sizing: border-box;
+  height: 100%; /* Ensure html takes full height */
+  /* overflow-x: hidden; /* Optional: uncomment to prevent accidental horizontal scroll */
+}
+
+*,
+*:before,
+*:after {
+  box-sizing: inherit;
+}
+
+body {
+  margin: 0;
+  padding: 0; /* Ensure no default browser padding */
+  min-height: 100%; /* Make body take at least full height of html */
+  width: 100%; /* Make body take full width */
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif; /* Your specified font stack */
+  line-height: 1.5;
+  font-weight: 400;
+  /* The color-scheme, text color, and background color will be primarily handled by
+     your App.js component's Tailwind classes (e.g., dark:bg-slate-950)
+     and ThemeContext. You can remove the :root color/background definitions below
+     if Tailwind is fully managing this. */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;

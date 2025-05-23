@@ -16,27 +16,30 @@ import (
 	// but often used for request/response structuring if not fully handled by client.
 )
 
-// animeServiceClient is initialized once and reused.
-var animeServiceClient *client.AnimeClient
+var animeServiceClient client.AnimeServiceAPIClient
 
-func InitAnimeServiceClient() { // Call this from main.go after env load
+func InitAnimeServiceClient() {
+	// NewAnimeClient() returns *client.AnimeClient, which satisfies AnimeServiceAPIClient
 	animeServiceClient = client.NewAnimeClient()
 }
 
-// Helper function to get animeServiceClient with RequestID
-func getClientWithRequestID(c *gin.Context) *client.AnimeClient {
+// This function allows tests to inject a MOCK that also satisfies AnimeServiceAPIClient
+func SetAnimeServiceClientForTest(mockClient client.AnimeServiceAPIClient) {
+	animeServiceClient = mockClient
+}
+
+// getClientWithRequestID should also work with the interface
+func getClientWithRequestID(c *gin.Context) client.AnimeServiceAPIClient {
 	if animeServiceClient == nil {
-		// This should not happen if InitAnimeServiceClient is called at startup
-		log.Println("Error: animeServiceClient not initialized!")
-		InitAnimeServiceClient() // Fallback initialization
+		InitAnimeServiceClient()
 	}
 	reqID, exists := c.Get("RequestID")
 	if exists {
-		if idStr, ok := reqID.(string); ok {
+		if idStr, ok := reqID.(string); ok && idStr != "" {
 			return animeServiceClient.WithRequestID(idStr)
 		}
 	}
-	return animeServiceClient // Return base client if no RequestID
+	return animeServiceClient
 }
 
 // SearchAnime forwards search to anime-service

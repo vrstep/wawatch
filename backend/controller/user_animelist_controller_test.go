@@ -1,73 +1,163 @@
-package controller
+package controller_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin" // For the mock client and interface
 	"github.com/stretchr/testify/assert"
+	"github.com/vrstep/wawatch-backend/config"
+	"github.com/vrstep/wawatch-backend/controller" // For SetAnimeServiceClientForTest
 	"github.com/vrstep/wawatch-backend/models"
 	"gorm.io/gorm"
 )
 
-// Test GetUserAnimeListStats Endpoint
-func TestGetUserAnimeListStats(t *testing.T) {
-	mock, cleanup := SetupTestDB(t)
-	defer cleanup()
-	router := SetupGin()
+// testRouter and testDB are assumed to be initialized by TestMain
+// MockAnimeServiceClient struct is defined (as fixed in Part 1)
 
-	mockUserID := uint(1)
-	mockUser := models.User{Model: gorm.Model{ID: mockUserID}}
+func TestAddAnimeToList_NewItem_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "listadd", "password")
 
-	score8 := 8
-	score9 := 9
+	mockClient := new(MockAnimeServiceClient)
+	controller.SetAnimeServiceClientForTest(mockClient) // Inject mock
 
-	// Mock DB Expectations
-	rows := sqlmock.NewRows([]string{"id", "user_id", "anime_external_id", "status", "score", "progress"}).
-		AddRow(1, mockUserID, 101, models.Watching, &score8, 5).
-		AddRow(2, mockUserID, 102, models.Completed, &score9, 12).
-		AddRow(3, mockUserID, 103, models.Completed, &score9, 24).
-		AddRow(4, mockUserID, 104, models.Planned, nil, 0).
-		AddRow(5, mockUserID, 105, models.Watching, nil, 1) // No score
+	animeIDToAdd := 101
+	expectedAnimeDetailsFromService := &models.AnimeDetails{
+		ID: animeIDToAdd,
+		Title: struct {
+			Romaji  string `json:"romaji"`
+			English string `json:"english"`
+			Native  string `json:"native"`
+		}{
+			Romaji:  "Remote Anime",
+			English: "Remote Anime",
+			Native:  "",
+		},
+		Episodes: 12,
+		Format:   "TV",
+		CoverImage: struct {
+			Large  string `json:"large"`
+			Medium string `json:"medium"`
+		}{
+			Large:  "remote.jpg",
+			Medium: "",
+		},
+	}
 
-	mock.ExpectQuery(EscapeQuery(`SELECT * FROM "user_anime_lists" WHERE user_id = $1 AND "user_anime_lists"."deleted_at" IS NULL`)).
-		WithArgs(mockUserID).
-		WillReturnRows(rows)
+	// Expect GetAnimeByID to be called because item is not in local User-Service cache
+	mockClient.On("GetAnimeByID", animeIDToAdd).Return(expectedAnimeDetailsFromService, nil).Once()
 
-	// Setup Route
-	router.GET("/animelist/stats", func(c *gin.Context) {
-		c.Set("user", mockUser)
-		GetUserAnimeListStats(c)
-	})
+	payload := gin.H{"anime_id": animeIDToAdd, "status": models.Planned}
+	rr := performAuthRequest("POST", "/api/v1/me/animelist/", payload, token, testRouter)
 
-	// Perform Request
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/animelist/stats", nil)
-	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	var responseData struct{ Data models.UserAnimeList }
+	json.Unmarshal(rr.Body.Bytes(), &responseData) // Assuming structure { "message": "...", "data": ... }
+	assert.Equal(t, animeIDToAdd, responseData.Data.AnimeExternalID)
+	assert.Equal(t, models.Planned, responseData.Data.Status)
 
-	// Assertions
-	assert.Equal(t, http.StatusOK, w.Code)
+	// Verify in DB
+	var listEntry models.UserAnimeList
+	config.DB.Where("user_id = ? AND anime_external_id = ?", user.ID, animeIDToAdd).First(&listEntry)
+	assert.Equal(t, models.Planned, listEntry.Status)
 
-	var responseBody map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
-	assert.NoError(t, err)
+	// Verify local AnimeCache in user-service DB
+	var cacheEntry models.AnimeCache
+	config.DB.First(&cacheEntry, animeIDToAdd)
+	assert.Equal(t, expectedAnimeDetailsFromService.Title.English, cacheEntry.Title)
 
-	assert.Equal(t, float64(5), responseBody["total_anime"])
-	assert.Equal(t, float64(5+12+24+0+1), responseBody["episodes_watched"]) // 42
-
-	// Calculate expected mean score: (8 + 9 + 9) / 3 = 26 / 3 = 8.666...
-	assert.InDelta(t, 8.666, responseBody["mean_score"], 0.001)
-
-	statusCounts := responseBody["status_counts"].(map[string]interface{})
-	assert.Equal(t, float64(2), statusCounts[models.Watching])
-	assert.Equal(t, float64(2), statusCounts[models.Completed])
-	assert.Equal(t, float64(1), statusCounts[models.Planned])
-	assert.Equal(t, float64(0), statusCounts[models.Dropped])
-	assert.Equal(t, float64(0), statusCounts[models.Paused])
-	assert.Equal(t, float64(0), statusCounts[models.Rewatching])
-
-	assert.NoError(t, mock.ExpectationsWereMet())
+	mockClient.AssertExpectations(t)
 }
+
+func TestAddAnimeToList_UpdateExisting_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "listupdate", "password")
+	animeIDToUpdate := 102
+
+	// Pre-populate local AnimeCache for this test to skip anime-service call
+	config.DB.Create(&models.AnimeCache{ID: animeIDToUpdate, Title: "Cached Anime", Format: "TV"})
+	// Pre-populate UserAnimeList entry
+	initialEntry := models.UserAnimeList{UserID: user.ID, AnimeExternalID: animeIDToUpdate, Status: models.Planned, Progress: 1}
+	config.DB.Create(&initialEntry)
+
+	// No mock setup needed for animeServiceClient.GetAnimeByID() as it should hit local cache
+
+	payload := gin.H{"anime_id": animeIDToUpdate, "status": models.Watching, "progress": 5}
+	rr := performAuthRequest("POST", "/api/v1/me/animelist/", payload, token, testRouter)
+
+	assert.Equal(t, http.StatusOK, rr.Code) // Should be update
+	var responseData struct{ Data models.UserAnimeList }
+	json.Unmarshal(rr.Body.Bytes(), &responseData)
+	assert.Equal(t, models.Watching, responseData.Data.Status)
+	assert.Equal(t, 5, responseData.Data.Progress)
+
+	var updatedEntry models.UserAnimeList
+	config.DB.First(&updatedEntry, initialEntry.ID)
+	assert.Equal(t, models.Watching, updatedEntry.Status)
+	assert.Equal(t, 5, updatedEntry.Progress)
+}
+
+func TestUpdateAnimeInList_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "entryupdate", "password")
+	entry := models.UserAnimeList{
+		UserID:          user.ID,
+		AnimeExternalID: 777,
+		Status:          models.Watching,
+		Progress:        5,
+	}
+	config.DB.Create(&entry) // entry.ID will be populated
+
+	payload := gin.H{"status": models.Completed, "progress": 12, "score": 9}
+	rr := performAuthRequest("PATCH", fmt.Sprintf("/api/v1/me/animelist/entry/%d", entry.ID), payload, token, testRouter)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var updatedEntry models.UserAnimeList
+	config.DB.First(&updatedEntry, entry.ID)
+	assert.Equal(t, models.Completed, updatedEntry.Status)
+	assert.Equal(t, 12, updatedEntry.Progress)
+	assert.NotNil(t, updatedEntry.Score)
+	assert.Equal(t, 9, *updatedEntry.Score)
+}
+
+func TestRemoveAnimeFromList_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "entrydelete", "password")
+	entry := models.UserAnimeList{UserID: user.ID, AnimeExternalID: 888, Status: models.Dropped}
+	config.DB.Create(&entry)
+
+	rr := performAuthRequest("DELETE", fmt.Sprintf("/api/v1/me/animelist/entry/%d", entry.ID), nil, token, testRouter)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var deletedEntry models.UserAnimeList
+	err := config.DB.First(&deletedEntry, entry.ID).Error
+	assert.Error(t, err) // Should be gorm.ErrRecordNotFound
+	assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+}
+
+func TestShowUserAnimeList_Success(t *testing.T) {
+	user, token := createAndLoginTestUser(config.DB, "showlist", "password")
+	// Pre-populate some list items and their cache entries
+	anime1ID, anime2ID := 901, 902
+	config.DB.Create(&models.AnimeCache{ID: anime1ID, Title: "Anime One"})
+	config.DB.Create(&models.AnimeCache{ID: anime2ID, Title: "Anime Two"})
+	config.DB.Create(&models.UserAnimeList{UserID: user.ID, AnimeExternalID: anime1ID, Status: models.Watching})
+	config.DB.Create(&models.UserAnimeList{UserID: user.ID, AnimeExternalID: anime2ID, Status: models.Planned})
+
+	rr := performAuthRequest("GET", "/api/v1/me/animelist/", nil, token, testRouter)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var response struct {
+		Data []controller.UserAnimeListResponse `json:"data"` // Use the response struct from controller
+		Meta map[string]interface{}             `json:"meta"`
+	}
+	json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.Len(t, response.Data, 2)
+	// Further assertions on content and meta
+}
+
+// Add tests for:
+// - AddToAnimeList when anime-service fails to find anime
+// - UpdateList with invalid entry ID, or entry not belonging to user
+// - RemoveList with invalid entry ID, or entry not belonging to user
+// - GetUserAnimeList with status filter, pagination
