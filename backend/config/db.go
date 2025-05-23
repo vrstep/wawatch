@@ -15,35 +15,6 @@ import (
 
 var DB *gorm.DB
 
-// func ConnectDB() {
-// 	// Ensure sslmode is explicitly handled if needed by your setup
-// 	dsn := "postgres://postgres:postgres@localhost:5432/wawatchdb?sslmode=disable"
-// 	// Use the imported GORM postgres driver here
-// 	db, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{})
-// 	if err != nil {
-// 		log.Fatalf("Failed to connect to database with GORM: %v", err)
-// 	}
-
-// 	// Get the underlying sql.DB connection for migrate
-// 	sqlDB, err := db.DB()
-// 	if err != nil {
-// 		log.Fatalf("Failed to get underlying sql.DB: %v", err)
-// 	}
-
-// 	// Run migrations using the existing DB connection
-// 	log.Println("Running database migrations...")
-// 	err = runMigrations(sqlDB) // Pass the sql.DB instance
-// 	if err != nil {
-// 		log.Fatalf("Failed to run database migrations: %v", err)
-// 	}
-// 	log.Println("Database migrations completed successfully.")
-
-// 	// --- AutoMigrate is commented out ---
-// 	// ... (keep AutoMigrate commented out)
-
-// 	DB = db
-// }
-
 func ConnectDB() {
 	// GORM connection
 	// dsn := "postgres://postgres:postgres@localhost:5432/wawatchdb?sslmode=disable"

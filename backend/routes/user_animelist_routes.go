@@ -6,23 +6,18 @@ import (
 	"github.com/vrstep/wawatch-backend/middleware"
 )
 
-func UserAnimeListRoute(router *gin.Engine) {
-	list := router.Group("/animelist")
-	list.Use(middleware.RequireAuth) // All routes require authentication
+func UserAnimeListRoutes(router *gin.Engine) {
+	// All user list operations require authentication
+	list := router.Group("/api/v1/me/animelist") // User's own list
+	list.Use(middleware.RequireAuth)
 	{
-		// Get user's anime list (optionally filtered by status)
-		list.GET("/", controller.GetUserAnimeList)
+		list.GET("/", controller.GetUserAnimeList)            // Get my list (paginated, status filter)
+		list.POST("/", controller.AddToAnimeList)             // Add/Update anime in my list
+		list.PATCH("/entry/:id", controller.UpdateListEntry)  // Update specific fields of a list entry (by list entry DB ID)
+		list.DELETE("/entry/:id", controller.DeleteListEntry) // Delete a list entry (by list entry DB ID)
+		list.GET("/stats", controller.GetUserAnimeListStats)
 
-		// Add anime to list or update if already exists
-		list.POST("/", controller.AddToAnimeList)
-
-		// Update a specific list entry
-		list.PATCH("/:id", controller.UpdateListEntry)
-
-		// Delete a list entry
-		list.DELETE("/:id", controller.DeleteListEntry)
-
-		list.GET("/stats", controller.GetUserAnimeListStats) // New Endpoint 3
-
+		// Check status of a specific anime (by its external ID) in the user's list
+		list.GET("/status/:animeExternalID", controller.GetAnimeInUserList)
 	}
 }

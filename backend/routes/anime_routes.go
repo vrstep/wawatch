@@ -6,29 +6,29 @@ import (
 	"github.com/vrstep/wawatch-backend/middleware"
 )
 
-// AnimeRoute defines routes that forward requests to the anime-service
-func AnimeRoute(router *gin.Engine) {
-	anime := router.Group("/anime")
+// AnimePassThroughRoutes defines routes that forward requests to the anime-service.
+// Most of these can be public if the anime-service itself doesn't require auth for them.
+// Auth here is to protect the user-service endpoint itself if needed, not necessarily for the data.
+func AnimePassThroughRoutes(router *gin.Engine) {
+	// Group for all routes that are essentially proxies to the anime-service
+	// The /api/v1 prefix matches what anime-service expects if client prepends it.
+	// Or, make paths here identical to anime-service and client calls them directly.
+	// Let's assume paths here mirror anime-service for clarity.
+	proxiedAnime := router.Group("/ext/anime")
+	proxiedAnime.Use(middleware.RequireAuth) // Using /ext to denote external call
 	{
-		// These routes now point to controller functions that use AnimeClient
-		// to call the anime-service. Authentication might still be required
-		// here to protect the user service endpoint itself.
-		anime.GET("/search", middleware.RequireAuth, controller.SearchAnime)
-		anime.GET("/:id", controller.GetAnimeDetails) // Consider if this needs auth
+		proxiedAnime.GET("/search", controller.SearchAnime)
+		proxiedAnime.GET("/popular", controller.GetPopularAnime)
+		proxiedAnime.GET("/trending", controller.GetTrendingAnime)
+		proxiedAnime.GET("/upcoming", controller.GetUpcomingAnime)                  // New in anime-service
+		proxiedAnime.GET("/recently-released", controller.GetRecentlyReleasedAnime) // New
+		proxiedAnime.GET("/explore", controller.ExploreAnime)                       // New
+		proxiedAnime.GET("/season/:year/:season", controller.GetAnimeBySeason)
 
-		// Public discovery endpoints (forwarded)
-		anime.GET("/popular", controller.GetPopularAnime)
-		anime.GET("/trending", controller.GetTrendingAnime)
-		anime.GET("/season/:year/:season", controller.GetAnimeBySeason)
+		// Recommendations might be user-specific eventually, but anime-service's is generic for now.
+		// If it becomes personalized, anime-service would need user context (e.g. user ID).
+		proxiedAnime.GET("/recommendations", controller.GetAnimeRecommendations)
 
-		// Recommendations (forwarded)
-		anime.GET("/recommendations", middleware.RequireAuth, controller.GetAnimeRecommendations)
-
-		// Check if anime is in the *user's* list (handled by user-animelist controller)
-		// This route might be better placed in user_animelist_routes.go, but if kept here:
-		anime.GET("/:id/list-status", middleware.RequireAuth, controller.GetAnimeInUserList)
-
-		// REMOVED: The route for adding providers is now handled by the anime-service
-		// anime.POST("/provider", middleware.RequireAuth, controller.AddWatchProvider)
+		proxiedAnime.GET("/:id", controller.GetAnimeDetails) // Gets details & providers
 	}
 }

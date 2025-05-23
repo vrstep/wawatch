@@ -2,7 +2,6 @@ package models
 
 import "gorm.io/gorm"
 
-// Represents a minimal cache or reference to an anime from the external API
 type AnimeCache struct {
 	gorm.Model // Automatically includes ID, CreatedAt, UpdatedAt, DeletedAt
 	// We use the external ID as our primary key for simplicity
