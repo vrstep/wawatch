@@ -9,7 +9,9 @@ type AniListAPI interface {
 	GetPopularAnime(page int, perPage int) ([]models.AnimeCache, int, error)
 	GetTrendingAnime(page int, perPage int) ([]models.AnimeCache, int, error)
 	GetAnimeBySeason(year int, season string, page int, perPage int) ([]models.AnimeCache, int, error)
-	// Add GetAnimeRecommendations if implementing it properly
+	GetUpcomingAnime(page int, perPage int) ([]models.AnimeCache, int, error)
+	GetRecentlyReleasedAnime(page int, perPage int) ([]models.AnimeCache, int, error)
+	GetAnimeByTags(tags []string, page int, perPage int) ([]models.AnimeCache, int, error) // Modified
 }
 
 // Ensure the real client implements the interface

@@ -22,9 +22,11 @@ func AnimeRoute(router *gin.Engine) {
 		anime.GET("/season/:year/:season", controller.GetAnimeBySeason) // Controller needs to be created/moved here
 
 		// Recommendations endpoint (implementation might differ from user service)
-		anime.GET("/recommendations", controller.GetAnimeRecommendations) // Controller needs to be created/moved here
+		anime.GET("/recommendations", controller.GetAnimeRecommendations)    // Controller needs to be created/moved here
+		anime.GET("/upcoming", controller.GetUpcomingAnime)                  // Controller needs to be created/moved here
+		anime.GET("/recently-released", controller.GetRecentlyReleasedAnime) // Controller needs to be created/moved here
+		anime.GET("/explore", controller.ExploreAnime)                       // New explore endpoint
 
-		// REMOVED: /:id/list-status - This belongs to the user service
-		// REMOVED: POST /provider - Moved to ProviderRoute under /providers
+		anime.GET("/")
 	}
 }

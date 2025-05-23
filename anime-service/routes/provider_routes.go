@@ -14,7 +14,7 @@ func ProviderRoute(router *gin.Engine) {
 	// You might add service-to-service auth later if needed.
 	providers := router.Group("/providers")
 	{
-		providers.POST("/", controller.AddWatchProvider)                  // Controller needs to be created/moved here
+		// providers.POST("/", controller.AddWatchProvider)                  // Controller needs to be created/moved here
 		providers.PUT("/:provider_id", controller.UpdateWatchProvider)    // Controller needs to be created/moved here
 		providers.DELETE("/:provider_id", controller.DeleteWatchProvider) // Controller needs to be created/moved here
 	}
